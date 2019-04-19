@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RobustPerception/azure_metrics_exporter/config"
@@ -78,6 +79,9 @@ type AzureClient struct {
 	client               *http.Client
 	accessToken          string
 	accessTokenExpiresOn time.Time
+
+	sync.RWMutex
+	LastSeenRateLimit int
 }
 
 // NewAzureClient returns an Azure client to talk the Azure API
@@ -239,6 +243,15 @@ func (ac *AzureClient) getMetricValue(resource string, metricNames string, aggre
 
 	if data.APIError.Code != "" {
 		return AzureMetricValueResponse{}, fmt.Errorf("Metrics API returned error: %s - %v", data.APIError.Code, data.APIError.Message)
+	}
+
+	if rateLimitStr := resp.Header.Get("x-ms-ratelimit-remaining-subscription-reads"); rateLimitStr != "" {
+		rateLimit, err := strconv.Atoi(rateLimitStr)
+		if err == nil {
+			ac.Lock()
+			ac.LastSeenRateLimit = rateLimit
+			ac.Unlock()
+		}
 	}
 
 	return data, nil
